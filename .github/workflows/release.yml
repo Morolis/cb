@@ -65,7 +65,6 @@ jobs:
       - name: Build .deb package
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          curl -sfL https://goreleaser.com/static/run | VERSION=v2.9.0 DISTRIBUTION=oss bash -s -- check
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           VERSION=$VERSION nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/
 
