@@ -72,8 +72,14 @@ brew install cb
 ### Docker（服务端）
 
 ```bash
+# 预构建镜像（推荐，支持 amd64 和 arm64）
+docker pull ghcr.io/morolis/cb:latest
+docker run -d -p 8080:8080 -v cb-data:/data --name cb --restart always ghcr.io/morolis/cb:latest
+
+# 或从源码构建
+git clone https://github.com/Morolis/cb.git && cd cb
 docker build -t cb-server .
-docker run -p 8080:8080 -v cb-data:/data cb-server
+docker run -d -p 8080:8080 -v cb-data:/data --name cb cb-server
 ```
 
 ## 命令

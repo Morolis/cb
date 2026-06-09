@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -32,41 +32,42 @@ jobs:
           mkdir -p ../server/web/dist
           cp -r dist/* ../server/web/dist/
 
-      - name: Build CLI (all platforms)
+      - name: Install arm64 cross-compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build CLI (linux amd64 + arm64, CGO)
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           LDFLAGS="-s -w -X main.version=$VERSION"
 
-          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
-            GOOS=${pair%/*}
-            GOARCH=${pair#*/}
-            EXT=""
-            [ "$GOOS" = "windows" ] && EXT=".exe"
-            echo "Building $GOOS/$GOARCH..."
-            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags "$LDFLAGS" \
-              -o "dist/cb-${GOOS}-${GOARCH}${EXT}" .
-          done
+          echo "Building linux/amd64..."
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags "$LDFLAGS" -o dist/cb-linux-amd64 .
 
-      - name: Build server (amd64 + arm64)
+          echo "Building linux/arm64..."
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
+            go build -trimpath -ldflags "$LDFLAGS" -o dist/cb-linux-arm64 .
+
+      - name: Build server (linux amd64 + arm64, CGO)
         run: |
           VERSION=${GITHUB_REF_NAME#v}
           LDFLAGS="-s -w -X main.version=$VERSION"
-          for arch in amd64 arm64; do
-            echo "Building server linux/$arch..."
-            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "$LDFLAGS" \
-              -o dist/cb-server-linux-$arch ./server/main.go
-          done
+
+          echo "Building server linux/amd64..."
+          CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags "$LDFLAGS" -o dist/cb-server-linux-amd64 ./server/main.go
+
+          echo "Building server linux/arm64..."
+          CGO_ENABLED=1 GOOS=linux GOARCH=arm64 CC=aarch64-linux-gnu-gcc \
+            go build -trimpath -ldflags "$LDFLAGS" -o dist/cb-server-linux-arm64 ./server/main.go
 
       - name: Package archives
         run: |
           cd dist
-          for f in cb-linux-amd64 cb-linux-arm64 cb-darwin-amd64 cb-darwin-arm64; do
-            tar -czf "${f}.tar.gz" "$f"
-          done
-          zip -q cb-windows-amd64.zip cb-windows-amd64.exe
-          for arch in amd64 arm64; do
-            tar -czf cb-server-linux-${arch}.tar.gz cb-server-linux-${arch}
-          done
+          tar -czf cb-linux-amd64.tar.gz cb-linux-amd64
+          tar -czf cb-linux-arm64.tar.gz cb-linux-arm64
+          tar -czf cb-server-linux-amd64.tar.gz cb-server-linux-amd64
+          tar -czf cb-server-linux-arm64.tar.gz cb-server-linux-arm64
 
       - name: Build .deb package
         run: |
@@ -74,28 +75,70 @@ jobs:
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           VERSION=$VERSION nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/
 
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum *.tar.gz *.zip *.deb > checksums.txt
-
-      - name: Upload artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: dist
-          path: dist/
+          name: linux
+          path: dist/*.tar.gz
 
-  windows-installer:
-    needs: build
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb
+          path: dist/*.deb
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build CLI (darwin amd64 + arm64, CGO)
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          LDFLAGS="-s -w -X main.version=$VERSION"
+
+          echo "Building darwin/amd64..."
+          CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
+            go build -trimpath -ldflags "$LDFLAGS" -o dist/cb-darwin-amd64 .
+
+          echo "Building darwin/arm64..."
+          CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 \
+            go build -trimpath -ldflags "$LDFLAGS" -o dist/cb-darwin-arm64 .
+
+      - name: Package
+        run: |
+          cd dist
+          tar -czf cb-darwin-amd64.tar.gz cb-darwin-amd64
+          tar -czf cb-darwin-arm64.tar.gz cb-darwin-arm64
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.tar.gz
+
+  build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/setup-go@v5
         with:
-          name: dist
-          path: dist/
+          go-version: '1.24'
+
+      - name: Build CLI (windows amd64, CGO)
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v',''
+          $ldflags = "-s -w -X main.version=$version"
+          $env:CGO_ENABLED = "1"
+          go build -trimpath -ldflags $ldflags -o dist\cb-windows-amd64.exe .
+
+      - name: Package zip
+        run: Compress-Archive -Path dist\cb-windows-amd64.exe -DestinationPath dist\cb-windows-amd64.zip
 
       - name: Install Inno Setup
         run: choco install innosetup -y
@@ -105,26 +148,24 @@ jobs:
           $version = "${{ github.ref_name }}" -replace '^v',''
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$version packaging\windows\cb.iss
 
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.zip
+
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: installer
+          name: windows-installer
           path: dist/CBSetup-amd64.exe
 
   docker:
-    needs: build
     runs-on: ubuntu-latest
     permissions:
       packages: write
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download server binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-          pattern: cb-server-linux-*
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -143,42 +184,31 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.ci
           platforms: linux/amd64,linux/arm64
           push: true
-          provenance: false
           tags: |
             ghcr.io/morolis/cb:${{ github.ref_name }}
             ghcr.io/morolis/cb:latest
 
   release:
-    needs: [build, windows-installer, docker]
+    needs: [build-linux, build-macos, build-windows, docker]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download dist artifacts
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dist
-          path: artifacts/dist/
+          path: artifacts/
 
-      - name: Download installer
-        uses: actions/download-artifact@v4
-        with:
-          name: installer
-          path: artifacts/installer/
-
-      - name: Collect files
+      - name: Collect and checksum
         run: |
           mkdir release
-          cp artifacts/dist/*.tar.gz release/
-          cp artifacts/dist/*.zip release/
-          cp artifacts/dist/*.deb release/
-          cp artifacts/dist/checksums.txt release/
-          cp artifacts/installer/*.exe release/
+          find artifacts -name '*.tar.gz' -exec cp {} release/ \;
+          find artifacts -name '*.zip' -exec cp {} release/ \;
+          find artifacts -name '*.deb' -exec cp {} release/ \;
+          find artifacts -name '*.exe' -exec cp {} release/ \;
           cd release
           sha256sum *.tar.gz *.zip *.deb *.exe > checksums.txt
+          ls -lh
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

@@ -72,8 +72,14 @@ brew install cb
 ### Docker (Server)
 
 ```bash
+# Pre-built image (recommended, supports amd64 and arm64)
+docker pull ghcr.io/morolis/cb:latest
+docker run -d -p 8080:8080 -v cb-data:/data --name cb --restart always ghcr.io/morolis/cb:latest
+
+# Or build from source
+git clone https://github.com/Morolis/cb.git && cd cb
 docker build -t cb-server .
-docker run -p 8080:8080 -v cb-data:/data cb-server
+docker run -d -p 8080:8080 -v cb-data:/data --name cb cb-server
 ```
 
 ## Commands
