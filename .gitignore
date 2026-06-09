@@ -1,0 +1,36 @@
+# Binaries
+dist/
+*.exe
+cb
+cb-server
+main
+
+# Database
+*.db
+*.sqlite
+*.db-journal
+*.db-wal
+
+# Config
+.cb/
+
+# TLS certs
+server/certs/
+
+# Go
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Frontend
+web/node_modules/
+web/dist/
+server/web/dist/
+
+# OS
+.DS_Store
+Thumbs.db

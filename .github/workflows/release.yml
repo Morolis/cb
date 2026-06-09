@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+          cp -r dist ../server/web/dist
+
+      - name: Build CLI (all platforms)
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          LDFLAGS="-s -w -X main.version=$VERSION"
+
+          for pair in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+            GOOS=${pair%/*}
+            GOARCH=${pair#*/}
+            EXT=""
+            [ "$GOOS" = "windows" ] && EXT=".exe"
+            echo "Building $GOOS/$GOARCH..."
+            CGO_ENABLED=0 GOOS=$GOOS GOARCH=$GOARCH go build -trimpath -ldflags "$LDFLAGS" \
+              -o "dist/cb-${GOOS}-${GOARCH}${EXT}" .
+          done
+
+      - name: Build server
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          LDFLAGS="-s -w -X main.version=$VERSION"
+          CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o dist/cb-server-linux-amd64 ./server/main.go
+
+      - name: Package archives
+        run: |
+          cd dist
+          for f in cb-linux-amd64 cb-linux-arm64 cb-darwin-amd64 cb-darwin-arm64; do
+            tar -czf "${f}.tar.gz" "$f"
+          done
+          zip -q cb-windows-amd64.zip cb-windows-amd64.exe
+          tar -czf cb-server-linux-amd64.tar.gz cb-server-linux-amd64
+
+      - name: Build .deb package
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          curl -sfL https://goreleaser.com/static/run | VERSION=v2.9.0 DISTRIBUTION=oss bash -s -- check
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          VERSION=$VERSION nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.zip *.deb > checksums.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  windows-installer:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+
+      - name: Build installer
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v',''
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=$version packaging\windows\cb.iss
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: dist/CBSetup-amd64.exe
+
+  release:
+    needs: [build, windows-installer]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Collect files
+        run: |
+          mkdir release
+          cp artifacts/dist/*.tar.gz release/
+          cp artifacts/dist/*.zip release/
+          cp artifacts/dist/*.deb release/
+          cp artifacts/dist/checksums.txt release/
+          cp artifacts/installer/*.exe release/
+          cd release
+          sha256sum *.tar.gz *.zip *.deb *.exe > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release/*
