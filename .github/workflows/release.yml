@@ -29,7 +29,8 @@ jobs:
         run: |
           npm ci
           npm run build
-          cp -r dist ../server/web/dist
+          mkdir -p ../server/web/dist
+          cp -r dist/* ../server/web/dist/
 
       - name: Build CLI (all platforms)
         run: |
