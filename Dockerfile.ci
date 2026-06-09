@@ -1,0 +1,11 @@
+ARG TARGETARCH
+FROM alpine:3.19
+RUN apk --no-cache add ca-certificates sqlite
+COPY dist/cb-server-linux-${TARGETARCH} /usr/local/bin/cb-server
+RUN chmod +x /usr/local/bin/cb-server
+
+EXPOSE 8080
+ENV CB_DB_PATH=/data/cb.db
+VOLUME /data
+
+ENTRYPOINT ["cb-server"]
