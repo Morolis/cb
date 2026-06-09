@@ -75,7 +75,7 @@ jobs:
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           VERSION=$VERSION nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/
 
-      - name: Upload
+      - name: Upload archives
         uses: actions/upload-artifact@v4
         with:
           name: linux
@@ -86,6 +86,12 @@ jobs:
         with:
           name: linux-deb
           path: dist/*.deb
+
+      - name: Upload server binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-binaries
+          path: dist/cb-server-linux-*
 
   build-macos:
     runs-on: macos-latest
@@ -161,11 +167,18 @@ jobs:
           path: dist/CBSetup-amd64.exe
 
   docker:
+    needs: build-linux
     runs-on: ubuntu-latest
     permissions:
       packages: write
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download server binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: server-binaries
+          path: dist/
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -184,6 +197,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.ci
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
