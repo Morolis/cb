@@ -1,8 +1,10 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/tls"
 	"embed"
+	"encoding/hex"
 	"fmt"
 	"io/fs"
 	"log"
@@ -24,10 +26,6 @@ var webFS embed.FS
 
 func main() {
 	jwtSecret := os.Getenv("CB_JWT_SECRET")
-	if jwtSecret == "" {
-		jwtSecret = "dev-secret-change-in-production"
-		fmt.Println("\033[31mWARNING: Using default JWT secret! Set CB_JWT_SECRET for production.\033[0m")
-	}
 
 	dbPath := os.Getenv("CB_DB_PATH")
 	if dbPath == "" {
@@ -63,6 +61,15 @@ func main() {
 		log.Fatalf("Failed to initialize store: %v", err)
 	}
 	defer s.Close()
+
+	if jwtSecret == "" {
+		jwtSecret, _ = s.GetSetting("jwt_secret")
+		if jwtSecret == "" {
+			jwtSecret = generateRandomSecret()
+			s.SetSetting("jwt_secret", jwtSecret)
+			fmt.Println("Auto-generated JWT secret (saved to database). Set CB_JWT_SECRET env to override.")
+		}
+	}
 
 	hub := ws.NewHub()
 	go hub.Run()
@@ -189,4 +196,10 @@ func main() {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}
+}
+
+func generateRandomSecret() string {
+	b := make([]byte, 32)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
