@@ -148,8 +148,8 @@ jobs:
           push: true
           provenance: false
           tags: |
-            ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:latest
+            ghcr.io/morolis/cb:${{ github.ref_name }}
+            ghcr.io/morolis/cb:latest
 
   release:
     needs: [build, windows-installer, docker]
@@ -157,10 +157,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      - name: Download dist artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          name: dist
+          path: artifacts/dist/
+
+      - name: Download installer
+        uses: actions/download-artifact@v4
+        with:
+          name: installer
+          path: artifacts/installer/
 
       - name: Collect files
         run: |
