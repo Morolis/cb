@@ -38,7 +38,7 @@ jobs:
       - name: Build CLI (linux amd64 + arm64, CGO)
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          LDFLAGS="-s -w -X main.version=$VERSION"
+          LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=${GITHUB_SHA::7} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           echo "Building linux/amd64..."
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
@@ -51,7 +51,7 @@ jobs:
       - name: Build server (linux amd64 + arm64, CGO)
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          LDFLAGS="-s -w -X main.version=$VERSION"
+          LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=${GITHUB_SHA::7} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           echo "Building server linux/amd64..."
           CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
@@ -105,7 +105,7 @@ jobs:
       - name: Build CLI (darwin amd64 + arm64, CGO)
         run: |
           VERSION=${GITHUB_REF_NAME#v}
-          LDFLAGS="-s -w -X main.version=$VERSION"
+          LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=${GITHUB_SHA::7} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           echo "Building darwin/amd64..."
           CGO_ENABLED=1 GOOS=darwin GOARCH=amd64 \
@@ -139,7 +139,9 @@ jobs:
       - name: Build CLI (windows amd64, CGO)
         run: |
           $version = "${{ github.ref_name }}" -replace '^v',''
-          $ldflags = "-s -w -X main.version=$version"
+          $commit = "${{ github.sha }}".Substring(0, 7)
+          $date = (Get-Date -Format "yyyy-MM-ddTHH:mm:ssZ")
+          $ldflags = "-s -w -X main.version=$version -X main.commit=$commit -X main.date=$date"
           $env:CGO_ENABLED = "1"
           go build -trimpath -ldflags $ldflags -o dist\cb-windows-amd64.exe .
 
@@ -208,18 +210,38 @@ jobs:
     needs: [build-linux, build-macos, build-windows, docker]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
+      - name: Download linux
         uses: actions/download-artifact@v4
         with:
-          path: artifacts/
+          name: linux
+          path: release/
 
-      - name: Collect and checksum
+      - name: Download linux-deb
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-deb
+          path: release/
+
+      - name: Download macos
+        uses: actions/download-artifact@v4
+        with:
+          name: macos
+          path: release/
+
+      - name: Download windows
+        uses: actions/download-artifact@v4
+        with:
+          name: windows
+          path: release/
+
+      - name: Download windows-installer
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: release/
+
+      - name: Checksum
         run: |
-          mkdir release
-          find artifacts -name '*.tar.gz' -exec cp {} release/ \;
-          find artifacts -name '*.zip' -exec cp {} release/ \;
-          find artifacts -name '*.deb' -exec cp {} release/ \;
-          find artifacts -name '*.exe' -exec cp {} release/ \;
           cd release
           sha256sum *.tar.gz *.zip *.deb *.exe > checksums.txt
           ls -lh

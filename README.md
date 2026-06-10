@@ -16,7 +16,7 @@ No more opening Slack, finding the chat, copying, pasting into terminal. `cb get
 **Wrote a gnarly SQL query at the office, want it at home.**
 No more emailing yourself, pasting into a note app, or AirDropping. `cb stash my-query "SELECT ..."` at work, `cb get my-query` at home.
 
-**Colleague needs your nginx config. Now.**
+**Colleague needs your nginx config. Now.** (TODO: direct sharing & team space in development)
 No more "hold on let me find it" + attaching files in chat. `cb stash nginx-conf < nginx.conf` — they run `cb get nginx-conf`.
 
 **Need to share an API key but it shouldn't live in Slack forever.**
@@ -191,13 +191,13 @@ cb rm --source local mycmd
 cb rm --source remote mycmd
 ```
 
-### `versions` — Version history
+### `history` — Version history
 
 View all past versions of a snippet.
 
 ```bash
-cb versions mycmd
-cb versions 597ebc3e
+cb history mycmd
+cb history 597ebc3e
 ```
 
 ### `rollback` — Restore a version

@@ -9,8 +9,9 @@ DIST="$ROOT_DIR/dist"
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
-LDFLAGS="-s -w -X main.version=$VERSION"
-FLAGS="-trimpath -ldflags '$LDFLAGS'"
+COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "none")
+DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE"
 
 build() {
     local goos=$1 goarch=$2 suffix=$3

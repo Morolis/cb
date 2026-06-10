@@ -14,8 +14,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var versionsCmd = &cobra.Command{
-	Use:   "versions [id|alias]",
+var historyCmd = &cobra.Command{
+	Use:   "history [id|alias]",
 	Short: "List version history of a snippet",
 	Long:  `Display all past versions of a snippet. Only works for remote (cloud) snippets.`,
 	Args:  cobra.ExactArgs(1),
@@ -76,5 +76,5 @@ var versionsCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.AddCommand(versionsCmd)
+	rootCmd.AddCommand(historyCmd)
 }

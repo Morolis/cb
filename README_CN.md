@@ -16,7 +16,7 @@
 **公司写了个复杂的 SQL，想回家继续。**
 不用发邮件给自己、不用粘贴到备忘录、不用 AirDrop。公司：`cb stash my-query "SELECT ..."`，家里：`cb get my-query`。
 
-**同事急着要你的 nginx 配置。**
+**同事急着要你的 nginx 配置。**（TODO: 定向分享 & 团队空间开发中）
 不用"等我找一下"然后挂电话去翻文件。`cb stash nginx-conf < nginx.conf` — 他运行 `cb get nginx-conf`。
 
 **要发个 API 密钥，但不想它永远留在聊天记录里。**
@@ -191,13 +191,13 @@ cb rm --source local mycmd
 cb rm --source remote mycmd
 ```
 
-### `versions` — 版本历史
+### `history` — 版本历史
 
 查看片段的所有历史版本。
 
 ```bash
-cb versions mycmd
-cb versions 597ebc3e
+cb history mycmd
+cb history 597ebc3e
 ```
 
 ### `rollback` — 回滚版本
