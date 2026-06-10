@@ -95,6 +95,7 @@ cb send --ttl 1h --encrypt "secret data"
 cb send --id 597ebc3e "updated content"       # 更新已有片段（产生版本历史）
 cb send --alias myconfig "v2"                  # 有则更新，无则创建
 cat config.yaml | cb send --alias myconfig
+cb send --alias post                          # 粘贴多行文本，按 Ctrl+D 结束输入
 ```
 
 | 参数 | 说明 |
@@ -150,6 +151,10 @@ cb stash --desc "数据库备份" db-backup "pg_dump mydb > backup.sql"
 cb get mycmd              # 通过别名
 cb get 597ebc3e           # 通过 ID（或前缀）
 cb get                    # 最近的片段
+cb get nginx-conf > /etc/nginx/nginx.conf   # 写入文件（Linux/macOS/Windows 均可）
+cb get myscript | sh      # 直接执行
+cb get deploy | pbcopy    # 复制到剪贴板（macOS）
+cb get deploy | xclip -selection clipboard  # 复制到剪贴板（Linux）
 ```
 
 ### `list` — 列出所有片段

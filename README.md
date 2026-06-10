@@ -95,6 +95,7 @@ cb send --ttl 1h --encrypt "secret data"
 cb send --id 597ebc3e "updated content"       # Update existing snippet (creates version history)
 cb send --alias myconfig "v2"                  # Upsert: update if alias exists, create if not
 cat config.yaml | cb send --alias myconfig
+cb send --alias post                          # Paste multi-line text, press Ctrl+D to finish
 ```
 
 | Flag | Description |
@@ -150,6 +151,10 @@ Get a snippet by ID or alias. Checks local first, then remote. No argument retur
 cb get mycmd              # By alias
 cb get 597ebc3e           # By ID (or prefix)
 cb get                    # Most recent snippet
+cb get nginx-conf > /etc/nginx/nginx.conf   # Save to file (Linux/macOS/Windows)
+cb get myscript | sh      # Execute directly
+cb get deploy | pbcopy    # Copy to clipboard (macOS)
+cb get deploy | xclip -selection clipboard  # Copy to clipboard (Linux)
 ```
 
 ### `list` — List all snippets

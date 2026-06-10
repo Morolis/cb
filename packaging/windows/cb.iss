@@ -12,9 +12,10 @@ SolidCompression=yes
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 PrivilegesRequired=admin
+ChangesEnvironment=true
 
 [Files]
-Source: "..\..\dist\cb-windows-amd64.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\..\dist\cb-windows-amd64.exe"; DestName: "cb.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Registry]
