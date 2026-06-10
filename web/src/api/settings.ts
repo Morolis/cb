@@ -1,13 +1,7 @@
 import api from './client'
 import type { UserView, SystemInfo } from '../types'
 import { useAuthStore } from '../stores/auth'
-
-function sha256(str: string): Promise<string> {
-  const buf = new TextEncoder().encode(str)
-  return crypto.subtle.digest('SHA-256', buf).then((hash) => {
-    return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('')
-  })
-}
+import { sha256 } from '../utils/crypto'
 
 // System settings (admin)
 export function getSettings() {

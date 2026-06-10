@@ -1,12 +1,6 @@
 import api from './client'
 import type { AuthResponse } from '../types'
-
-function sha256(str: string): Promise<string> {
-  const buf = new TextEncoder().encode(str)
-  return crypto.subtle.digest('SHA-256', buf).then((hash) => {
-    return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('')
-  })
-}
+import { sha256 } from '../utils/crypto'
 
 async function preHashPassword(username: string, password: string): Promise<string> {
   return sha256(`${username}:${password}`)
