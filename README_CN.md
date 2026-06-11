@@ -76,6 +76,9 @@ brew install cb
 docker pull ghcr.io/morolis/cb:latest
 docker run -d -p 8080:8080 -v cb-data:/data --name cb --restart always ghcr.io/morolis/cb:latest
 
+# 支持 HTTPS（需要时在 Web 端启用）
+docker run -d -p 8080:8080 -p 443:443 -v cb-data:/data --name cb --restart always ghcr.io/morolis/cb:latest
+
 # 或从源码构建
 git clone https://github.com/Morolis/cb.git && cd cb
 docker build -t cb-server .
@@ -295,6 +298,10 @@ CB_TLS_AUTO=true cb-server
 ```
 
 打开 `http://localhost:8080` 访问 Web UI。
+
+**启用 HTTPS：** 设置 → 服务配置 → 点击"启用 HTTPS"。服务端会自动生成自签证书并在 :443 启动 HTTPS。Docker 模式下启动容器时需加 `-p 443:443`。
+
+详见[部署指南](docs/deploy.md)了解 systemd、反向代理（Caddy/Nginx）和生产环境配置。
 
 ## 文档
 

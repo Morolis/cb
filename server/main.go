@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/Morolis/cb/server/handlers"
 	"github.com/Morolis/cb/server/internal/tlsutil"
@@ -23,6 +24,9 @@ import (
 
 //go:embed all:web/dist
 var webFS embed.FS
+
+var tlsAddr = ":443"
+var tlsEnabled atomic.Bool
 
 func main() {
 	jwtSecret := os.Getenv("CB_JWT_SECRET")
@@ -37,23 +41,41 @@ func main() {
 		addr = ":8080"
 	}
 
+	certDir := os.Getenv("CB_TLS_DIR")
+	if certDir == "" {
+		if _, err := os.Stat("/data/certs"); err == nil {
+			certDir = "/data/certs"
+		} else {
+			home, _ := os.UserHomeDir()
+			certDir = home + "/.cb/certs"
+		}
+	}
+
 	tlsCert := os.Getenv("CB_TLS_CERT")
 	tlsKey := os.Getenv("CB_TLS_KEY")
-	tlsAuto := os.Getenv("CB_TLS_AUTO")
 
-	// Auto-generate self-signed cert if requested
-	if tlsAuto == "true" && (tlsCert == "" || tlsKey == "") {
-		certDir := os.Getenv("CB_TLS_DIR")
-		if certDir == "" {
-			certDir = "."
+	// Check if certs exist in default dir
+	if tlsCert == "" || tlsKey == "" {
+		defaultCert := certDir + "/cert.pem"
+		defaultKey := certDir + "/key.pem"
+		if _, err := os.Stat(defaultCert); err == nil {
+			if _, err := os.Stat(defaultKey); err == nil {
+				tlsCert = defaultCert
+				tlsKey = defaultKey
+			}
 		}
+	}
+
+	// Auto-generate if CB_TLS_AUTO=true
+	if os.Getenv("CB_TLS_AUTO") == "true" && (tlsCert == "" || tlsKey == "") {
+		os.MkdirAll(certDir, 0700)
 		c, k, err := tlsutil.GenerateSelfSignedCert(certDir)
 		if err != nil {
 			log.Fatalf("Failed to generate TLS cert: %v", err)
 		}
 		tlsCert = c
 		tlsKey = k
-		fmt.Printf("Auto-generated TLS cert: %s\n", certDir)
+		fmt.Printf("Auto-generated TLS cert in %s\n", certDir)
 	}
 
 	s, err := store.New(dbPath)
@@ -74,7 +96,7 @@ func main() {
 	hub := ws.NewHub()
 	go hub.Run()
 
-	// TLS Manager (supports hot-reload via GetCertificate)
+	// TLS Manager
 	var tlsManager *tlsutil.Manager
 	if tlsCert != "" && tlsKey != "" {
 		tlsManager, err = tlsutil.NewManager(tlsCert, tlsKey)
@@ -84,16 +106,45 @@ func main() {
 		}
 	}
 
+	r := gin.Default()
+	r.Use(middleware.CORSMiddleware())
+
+	// HTTPS listener management
+	var httpsListener net.Listener
+	startHTTPS := func(m *tlsutil.Manager) {
+		tlsManager = m
+		tlsEnabled.Store(true)
+		go func() {
+			fmt.Printf("HTTPS listener starting on %s\n", tlsAddr)
+			tlsConfig := &tls.Config{GetCertificate: m.GetCertificate}
+			listener, err := net.Listen("tcp", tlsAddr)
+			if err != nil {
+				log.Printf("Failed to start HTTPS listener on %s: %v", tlsAddr, err)
+				return
+			}
+			httpsListener = listener
+			tlsListener := tls.NewListener(listener, tlsConfig)
+			if err := http.Serve(tlsListener, r); err != nil {
+				log.Printf("HTTPS server error: %v", err)
+			}
+		}()
+	}
+	stopHTTPS := func() {
+		tlsEnabled.Store(false)
+		if httpsListener != nil {
+			httpsListener.Close()
+			httpsListener = nil
+		}
+		tlsManager = nil
+	}
+
 	authHandler := handlers.NewAuthHandler(s, jwtSecret)
 	webhookHandler := handlers.NewWebhookHandler(s)
 	snippetHandler := handlers.NewSnippetHandler(s, webhookHandler, hub)
 	deviceHandler := handlers.NewDeviceHandler(s)
 	wsHandler := handlers.NewWSHandler(hub)
-	settingsHandler := handlers.NewSettingsHandler(s, tlsManager)
+	settingsHandler := handlers.NewSettingsHandler(s, tlsManager, certDir, startHTTPS, stopHTTPS)
 	adminHandler := handlers.NewAdminHandler(s)
-
-	r := gin.Default()
-	r.Use(middleware.CORSMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
@@ -120,7 +171,6 @@ func main() {
 		protected.POST("/devices/heartbeat", deviceHandler.Heartbeat)
 		protected.GET("/devices", deviceHandler.ListOnline)
 
-		// Webhooks
 		protected.POST("/webhooks", webhookHandler.Create)
 		protected.GET("/webhooks", webhookHandler.List)
 		protected.DELETE("/webhooks/:id", webhookHandler.Delete)
@@ -136,9 +186,10 @@ func main() {
 		admin.GET("/system", adminHandler.SystemInfo)
 		admin.GET("/settings", settingsHandler.GetSettings)
 		admin.PUT("/settings", settingsHandler.UpdateSettings)
-		admin.POST("/settings/tls", settingsHandler.UploadTLS)
-		admin.POST("/settings/tls/generate", settingsHandler.GenerateTLS)
+		admin.POST("/settings/tls/enable", settingsHandler.EnableTLS)
+		admin.POST("/settings/tls/disable", settingsHandler.DisableTLS)
 		admin.GET("/users", adminHandler.ListUsers)
+		admin.POST("/users", adminHandler.CreateUser)
 		admin.DELETE("/users/:id", adminHandler.DeleteUser)
 		admin.PUT("/users/:id/admin", adminHandler.ToggleAdmin)
 		admin.PUT("/users/:id/password", adminHandler.ResetUserPassword)
@@ -172,29 +223,28 @@ func main() {
 		})
 	}
 
+	// Dynamic HTTP handler: redirect to HTTPS when TLS is enabled, otherwise serve normally
+	httpHandler := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if tlsEnabled.Load() {
+			host := strings.Split(req.Host, ":")[0]
+			target := "https://" + host + req.URL.Path
+			if req.URL.RawQuery != "" {
+				target += "?" + req.URL.RawQuery
+			}
+			http.Redirect(w, req, target, http.StatusTemporaryRedirect)
+			return
+		}
+		r.ServeHTTP(w, req)
+	})
+
+	// Start HTTPS if TLS is already configured
 	if tlsManager != nil {
-		// TLS with hot-reload: GetCertificate reads cert on each connection
-		fmt.Printf("cb server starting on %s (TLS)\n", addr)
+		startHTTPS(tlsManager)
+	}
 
-		listener, err := net.Listen("tcp", addr)
-		if err != nil {
-			log.Fatalf("Failed to listen: %v", err)
-		}
-
-		tlsConfig := &tls.Config{
-			GetCertificate: tlsManager.GetCertificate,
-		}
-		tlsListener := tls.NewListener(listener, tlsConfig)
-
-		if err := http.Serve(tlsListener, r); err != nil {
-			log.Fatalf("Server failed: %v", err)
-		}
-	} else {
-		fmt.Printf("cb server starting on %s\n", addr)
-		fmt.Println("WARNING: Running without TLS. Use CB_TLS_CERT and CB_TLS_KEY for production.")
-		if err := r.Run(addr); err != nil {
-			log.Fatalf("Server failed: %v", err)
-		}
+	fmt.Printf("cb server starting on %s\n", addr)
+	if err := http.ListenAndServe(addr, httpHandler); err != nil {
+		log.Fatalf("Server failed: %v", err)
 	}
 }
 

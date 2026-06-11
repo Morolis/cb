@@ -3,7 +3,8 @@ import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import { useI18n } from '../i18n'
-import { getSettings, updateSettings, uploadTLS, generateTLS, getUsers, deleteUser, toggleAdmin, resetUserPassword, changePassword, getSystemInfo } from '../api/settings'
+import { getSettings, updateSettings, getUsers, deleteUser, toggleAdmin, resetUserPassword, changePassword, getSystemInfo } from '../api/settings'
+import api from '../api/client'
 import { getWebhooks, createWebhook, deleteWebhook, toggleWebhook, getWebhookLogs } from '../api/webhooks'
 import type { UserView, SystemInfo, Webhook, WebhookLog } from '../types'
 import AppHeader from '../components/layout/AppHeader.vue'
@@ -31,10 +32,16 @@ const settings = ref<Record<string, any>>({})
 const settingsLoading = ref(false)
 const settingsMsg = ref('')
 const corsOrigin = ref('')
-const tlsCert = ref('')
-const tlsKey = ref('')
+const tlsLoading = ref(false)
 const tlsMsg = ref('')
+const tlsDisableConfirm = ref(false)
+const tlsCountdown = ref(3)
+let tlsDisableTimer: number | null = null
 const users = ref<UserView[]>([])
+const newUsername = ref('')
+const newUserPass = ref('')
+const addUserError = ref('')
+const addUserLoading = ref(false)
 const deleteConfirm = ref('')
 const resetTarget = ref('')
 const resetNewPass = ref('')
@@ -122,22 +129,68 @@ async function saveCORS() {
   } catch (e: any) { settingsMsg.value = e.response?.data?.error || 'Failed' }
 }
 
-async function handleUploadTLS() {
+async function handleEnableTLS() {
   tlsMsg.value = ''
+  tlsLoading.value = true
   try {
-    const { data } = await uploadTLS(tlsCert.value, tlsKey.value)
-    tlsMsg.value = data.message || t('server.tls_applied')
-    tlsCert.value = ''; tlsKey.value = ''; loadSettings()
+    const { data } = await api.post('/admin/settings/tls/enable')
+    tlsMsg.value = data.message || 'HTTPS enabled'
+    settings.value.tls_enabled = true
+    settings.value.http_redirect = true
+    setTimeout(() => {
+      const host = window.location.hostname
+      window.location.href = `https://${host}`
+    }, 2000)
   } catch (e: any) { tlsMsg.value = e.response?.data?.error || 'Failed' }
+  finally { tlsLoading.value = false }
 }
 
-async function handleGenerateTLS() {
-  tlsMsg.value = ''
+function handleDisableTLS() {
+  // Phase 1: counting down
+  if (tlsCountdown.value > 0 && !tlsDisableConfirm.value) {
+    tlsDisableConfirm.value = true
+    tlsCountdown.value = 3
+    if (tlsDisableTimer) clearInterval(tlsDisableTimer)
+    tlsDisableTimer = window.setInterval(() => {
+      tlsCountdown.value--
+      if (tlsCountdown.value <= 0) {
+        clearInterval(tlsDisableTimer!)
+        tlsDisableTimer = null
+        // Start 10s window for confirmation
+        tlsDisableTimer = window.setTimeout(() => {
+          tlsDisableConfirm.value = false
+          tlsCountdown.value = 3
+          tlsDisableTimer = null
+        }, 10000)
+      }
+    }, 1000)
+    return
+  }
+  // Phase 2: confirmed
+  if (tlsDisableTimer) { clearInterval(tlsDisableTimer); clearTimeout(tlsDisableTimer); tlsDisableTimer = null }
+  tlsDisableConfirm.value = false
+  tlsCountdown.value = 3
+  tlsLoading.value = true
+  api.post('/admin/settings/tls/disable').then(() => {
+    settings.value.tls_enabled = false
+    setTimeout(() => {
+      window.location.href = `http://${window.location.hostname}`
+    }, 1000)
+  }).catch((e: any) => { alert(e.response?.data?.error || 'Failed') })
+    .finally(() => { tlsLoading.value = false })
+}
+
+async function handleAddUser() {
+  addUserError.value = ''
+  if (!newUsername.value || !newUserPass.value) { addUserError.value = 'Username and password required'; return }
+  if (newUserPass.value.length < 6) { addUserError.value = 'Password must be at least 6 characters'; return }
+  addUserLoading.value = true
   try {
-    const { data } = await generateTLS()
-    tlsMsg.value = data.message || t('server.tls_generated')
-    loadSettings()
-  } catch (e: any) { tlsMsg.value = e.response?.data?.error || 'Failed' }
+    await api.post('/admin/users', { username: newUsername.value, password: newUserPass.value })
+    newUsername.value = ''; newUserPass.value = ''
+    await loadUsers()
+  } catch (e: any) { addUserError.value = e.response?.data?.error || 'Failed' }
+  finally { addUserLoading.value = false }
 }
 
 async function loadUsers() {
@@ -407,36 +460,115 @@ function toggleEvent(ev: string) {
           <div v-if="settingsLoading" class="text-gray-400 text-sm">{{ t('common.loading') }}</div>
           <div v-else class="space-y-3">
             <div class="flex items-center gap-3">
-              <span class="text-sm text-gray-500 w-32">{{ t('server.tls') }}</span>
-              <span :class="settings.tls_enabled ? 'text-green-600' : 'text-gray-400'" class="text-sm font-medium">{{ settings.tls_enabled ? t('server.enabled') : t('server.disabled') }}</span>
-              <span v-if="settings.tls_cert_path" class="text-xs text-gray-400 font-mono">{{ settings.tls_cert_path }}</span>
-            </div>
-            <div class="flex items-center gap-3">
               <span class="text-sm text-gray-500 w-32">{{ t('server.cors') }}</span>
               <input v-model="corsOrigin" placeholder="*" class="input flex-1" />
               <button @click="saveCORS" class="btn-secondary">{{ t('server.save') }}</button>
             </div>
+            <p class="text-xs text-gray-400">{{ t('server.cors_hint') }}</p>
             <p v-if="settingsMsg" class="text-sm text-green-600">{{ settingsMsg }}</p>
           </div>
         </div>
 
         <div class="card p-6">
-          <h3 class="font-medium text-gray-900 mb-2">{{ t('server.tls_cert') }}</h3>
-          <p class="text-sm text-gray-500 mb-4">{{ t('server.tls_desc') }}</p>
-          <div class="space-y-3 mb-4">
-            <textarea v-model="tlsCert" rows="4" placeholder="-----BEGIN CERTIFICATE-----" class="input font-mono text-xs" />
-            <textarea v-model="tlsKey" rows="4" placeholder="-----BEGIN EC PRIVATE KEY-----" class="input font-mono text-xs" />
-            <button @click="handleUploadTLS" :disabled="!tlsCert || !tlsKey" class="btn-primary disabled:opacity-50">{{ t('server.upload') }}</button>
+          <h3 class="font-medium text-gray-900 mb-3">{{ t('server.https') }}</h3>
+          <p class="text-sm text-gray-500 mb-4">{{ t('server.https_desc') }}</p>
+          <div v-if="settings.tls_enabled">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+              <span class="text-sm text-green-600 font-medium">{{ t('server.https_active') }}</span>
+            </div>
+            <p class="text-xs text-gray-400 mb-4">{{ t('server.https_redirect_note') }}</p>
+            <div class="border-t border-gray-100 pt-4 flex items-center gap-3">
+              <button @click="handleDisableTLS" :disabled="tlsCountdown > 0 && tlsDisableConfirm && !tlsLoading"
+                :class="[
+                  'px-4 py-2 rounded-xl text-sm font-medium transition-all',
+                  tlsLoading ? 'bg-gray-200 text-gray-400' :
+                  tlsDisableConfirm && tlsCountdown > 0 ? 'bg-gray-200 text-gray-500' :
+                  tlsDisableConfirm && tlsCountdown <= 0 ? 'bg-red-600 text-white' :
+                  'border border-red-200 text-red-600 hover:bg-red-50'
+                ]">
+                {{ tlsLoading ? '...' :
+                   tlsDisableConfirm && tlsCountdown > 0 ? t('server.disabling') + ' (' + tlsCountdown + ')' :
+                   tlsDisableConfirm && tlsCountdown <= 0 ? t('server.confirm_disable') :
+                   t('server.disable_https') }}
+              </button>
+              <span class="text-xs text-gray-400">{{ t('server.disable_https_hint') }}</span>
+            </div>
           </div>
-          <div class="border-t border-gray-100 pt-4">
-            <button @click="handleGenerateTLS" class="btn-secondary">{{ t('server.generate') }}</button>
+          <div v-else>
+            <div class="bg-amber-50 border border-amber-100 rounded-lg p-3 mb-3">
+              <p class="text-xs text-amber-700">{{ t('server.https_note') }}</p>
+            </div>
+            <button @click="handleEnableTLS" :disabled="tlsLoading" class="btn-primary">
+              {{ tlsLoading ? '...' : t('server.enable_https') }}
+            </button>
+            <p v-if="tlsMsg" class="mt-2 text-sm" :class="tlsMsg.includes('enabled') ? 'text-green-600' : 'text-red-600'">{{ tlsMsg }}</p>
           </div>
-          <p v-if="tlsMsg" class="mt-3 text-sm" :class="tlsMsg.includes('applied') || tlsMsg.includes('generated') ? 'text-green-600' : 'text-red-600'">{{ tlsMsg }}</p>
+        </div>
+
+        <div class="card p-6">
+          <h3 class="font-medium text-gray-900 mb-3">{{ t('server.reverse_proxy') }}</h3>
+          <p class="text-sm text-gray-500 mb-4">{{ t('server.proxy_desc') }}</p>
+
+          <div class="space-y-4">
+            <div>
+              <h4 class="text-sm font-medium text-gray-700 mb-2">Caddy {{ t('server.recommended') }}</h4>
+              <pre class="bg-gray-50 p-3 rounded-lg text-xs font-mono text-gray-700 overflow-x-auto">cb.yourdomain.com {
+    reverse_proxy localhost:8080
+}</pre>
+              <p class="text-xs text-gray-400 mt-1">{{ t('server.caddy_hint') }}</p>
+            </div>
+
+            <div class="border-t border-gray-100 pt-4">
+              <h4 class="text-sm font-medium text-gray-700 mb-2">Nginx</h4>
+              <pre class="bg-gray-50 p-3 rounded-lg text-xs font-mono text-gray-700 overflow-x-auto whitespace-pre-wrap">server {
+    listen 443 ssl http2;
+    server_name cb.yourdomain.com;
+
+    ssl_certificate     /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /v1/ws {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_read_timeout 86400s;
+    }
+}</pre>
+              <p class="text-xs text-gray-400 mt-1">{{ t('server.nginx_hint') }}</p>
+            </div>
+          </div>
         </div>
       </div>
 
       <!-- Users -->
-      <div v-if="activeTab === 'users' && auth.isAdmin">
+      <div v-if="activeTab === 'users' && auth.isAdmin" class="space-y-4">
+        <div class="card p-6">
+          <h3 class="font-medium text-gray-900 mb-3">{{ t('users.add_user') }}</h3>
+          <form @submit.prevent="handleAddUser" class="flex gap-3 items-end">
+            <div class="flex-1">
+              <input v-model="newUsername" :placeholder="t('users.username')" required class="input" />
+            </div>
+            <div class="flex-1">
+              <input v-model="newUserPass" type="password" :placeholder="t('account.new_pass')" required minlength="6" class="input" />
+            </div>
+            <button type="submit" :disabled="addUserLoading" class="btn-primary whitespace-nowrap">
+              {{ addUserLoading ? '...' : t('users.add_user') }}
+            </button>
+          </form>
+          <p v-if="addUserError" class="mt-2 text-sm text-red-600">{{ addUserError }}</p>
+        </div>
+
         <div class="card overflow-hidden">
           <table class="w-full text-sm">
             <thead class="bg-gray-50 border-b border-gray-100">

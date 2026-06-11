@@ -12,14 +12,6 @@ export function updateSettings(settings: Record<string, string>) {
   return api.put('/admin/settings', settings)
 }
 
-export function uploadTLS(cert: string, key: string) {
-  return api.post('/admin/settings/tls', { cert, key })
-}
-
-export function generateTLS() {
-  return api.post('/admin/settings/tls/generate')
-}
-
 // User management (admin)
 export function getUsers() {
   return api.get<{ items: UserView[] }>('/admin/users')

@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Morolis/cb/server/models"
 	"github.com/Morolis/cb/server/store"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -43,6 +45,43 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+type createUserRequest struct {
+	Username string `json:"username" binding:"required,min=2,max=32"`
+	Password string `json:"password" binding:"required,min=6,max=128"`
+}
+
+func (h *AdminHandler) CreateUser(c *gin.Context) {
+	var req createUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to hash password"})
+		return
+	}
+
+	user := &models.User{
+		ID:           uuid.New().String(),
+		Username:     req.Username,
+		PasswordHash: string(hash),
+		IsAdmin:      false,
+	}
+
+	if err := h.store.CreateUser(user); err != nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "username already taken"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{
+		"id":       user.ID,
+		"username": user.Username,
+		"is_admin": false,
+	})
 }
 
 func (h *AdminHandler) DeleteUser(c *gin.Context) {

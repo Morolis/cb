@@ -17,8 +17,10 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates sqlite3 && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /cb-server /usr/local/bin/cb-server
 
-EXPOSE 8080
+EXPOSE 8080 443
 ENV CB_DB_PATH=/data/cb.db
+ENV CB_TLS_DIR=/data/certs
+RUN mkdir -p /data/certs
 VOLUME /data
 
 ENTRYPOINT ["cb-server"]

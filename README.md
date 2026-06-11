@@ -76,6 +76,9 @@ brew install cb
 docker pull ghcr.io/morolis/cb:latest
 docker run -d -p 8080:8080 -v cb-data:/data --name cb --restart always ghcr.io/morolis/cb:latest
 
+# With HTTPS support (enable from web UI when ready)
+docker run -d -p 8080:8080 -p 443:443 -v cb-data:/data --name cb --restart always ghcr.io/morolis/cb:latest
+
 # Or build from source
 git clone https://github.com/Morolis/cb.git && cd cb
 docker build -t cb-server .
@@ -295,6 +298,10 @@ CB_TLS_AUTO=true cb-server
 ```
 
 Open `http://localhost:8080` for the Web UI.
+
+**Enable HTTPS:** Settings → Server Config → click "Enable HTTPS". The server generates a self-signed certificate and starts HTTPS on :443. For Docker, add `-p 443:443` when starting the container.
+
+See [Deployment Guide](docs/deploy.md) for systemd, reverse proxy (Caddy/Nginx), and production setup.
 
 ## Documentation
 

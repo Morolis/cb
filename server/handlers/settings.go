@@ -9,28 +9,26 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type StartHTTPSFunc func(*tlsutil.Manager)
+type StopHTTPSFunc func()
+
 type SettingsHandler struct {
 	store      *store.Store
 	tlsManager *tlsutil.Manager
+	certDir    string
+	startHTTPS StartHTTPSFunc
+	stopHTTPS  StopHTTPSFunc
 }
 
-func NewSettingsHandler(s *store.Store, tls *tlsutil.Manager) *SettingsHandler {
-	return &SettingsHandler{store: s, tlsManager: tls}
+func NewSettingsHandler(s *store.Store, tls *tlsutil.Manager, certDir string, startHTTPS StartHTTPSFunc, stopHTTPS StopHTTPSFunc) *SettingsHandler {
+	return &SettingsHandler{store: s, tlsManager: tls, certDir: certDir, startHTTPS: startHTTPS, stopHTTPS: stopHTTPS}
 }
 
 func (h *SettingsHandler) GetSettings(c *gin.Context) {
 	settings := map[string]interface{}{
 		"cors_origin": os.Getenv("CB_CORS_ORIGIN"),
+		"tls_enabled": h.tlsManager != nil,
 	}
-
-	if h.tlsManager != nil {
-		settings["tls_enabled"] = true
-		settings["tls_cert_path"] = h.tlsManager.CertFile()
-		settings["tls_key_path"] = h.tlsManager.KeyFile()
-	} else {
-		settings["tls_enabled"] = false
-	}
-
 	c.JSON(http.StatusOK, gin.H{"settings": settings})
 }
 
@@ -49,79 +47,51 @@ func (h *SettingsHandler) UpdateSettings(c *gin.Context) {
 		os.Setenv("CB_CORS_ORIGIN", req.CORSOrigin)
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "settings updated. Some changes require restart to take effect."})
+	c.JSON(http.StatusOK, gin.H{"message": "settings updated."})
 }
 
-type uploadTLSRequest struct {
-	Cert string `json:"cert" binding:"required"`
-	Key  string `json:"key" binding:"required"`
-}
-
-func (h *SettingsHandler) UploadTLS(c *gin.Context) {
-	var req uploadTLSRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+func (h *SettingsHandler) EnableTLS(c *gin.Context) {
+	if h.tlsManager != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "TLS is already enabled."})
 		return
 	}
 
-	if h.tlsManager == nil {
-		// No TLS manager exists, create one
-		certDir := "certs"
-		os.MkdirAll(certDir, 0700)
+	os.MkdirAll(h.certDir, 0700)
 
-		certPath := certDir + "/cert.pem"
-		keyPath := certDir + "/key.pem"
-
-		if err := os.WriteFile(certPath, []byte(req.Cert), 0644); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write cert"})
-			return
-		}
-		if err := os.WriteFile(keyPath, []byte(req.Key), 0600); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to write key"})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"message": "TLS certificate saved. Restart server with CB_TLS_CERT=" + certPath + " to enable TLS.",
-		})
-		return
-	}
-
-	// Hot-reload: update files and reload certificate
-	if err := h.tlsManager.UpdateFiles(req.Cert, req.Key); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reload certificate: " + err.Error()})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"message": "TLS certificate updated and applied immediately. No restart needed."})
-}
-
-func (h *SettingsHandler) GenerateTLS(c *gin.Context) {
-	certDir := "certs"
-	os.MkdirAll(certDir, 0700)
-
-	certPath, keyPath, err := tlsutil.GenerateSelfSignedCert(certDir)
+	certPath, keyPath, err := tlsutil.GenerateSelfSignedCert(h.certDir)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate cert: " + err.Error()})
 		return
 	}
 
-	if h.tlsManager != nil {
-		if err := h.tlsManager.Reload(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "generated but failed to reload: " + err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{
-			"message":   "Self-signed certificate generated and applied immediately.",
-			"cert_path": certPath,
-			"key_path":  keyPath,
-		})
+	m, err := tlsutil.NewManager(certPath, keyPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load cert: " + err.Error()})
 		return
 	}
 
+	h.tlsManager = m
+	if h.startHTTPS != nil {
+		h.startHTTPS(m)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message":   "Self-signed certificate generated. Restart server with CB_TLS_CERT=" + certPath + " to enable TLS.",
+		"message":   "HTTPS enabled. HTTP requests will be redirected to HTTPS.",
 		"cert_path": certPath,
 		"key_path":  keyPath,
 	})
+}
+
+func (h *SettingsHandler) DisableTLS(c *gin.Context) {
+	if h.tlsManager == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "HTTPS is not enabled"})
+		return
+	}
+
+	if h.stopHTTPS != nil {
+		h.stopHTTPS()
+	}
+
+	h.tlsManager = nil
+	c.JSON(http.StatusOK, gin.H{"message": "HTTPS disabled. Server is now HTTP only."})
 }
